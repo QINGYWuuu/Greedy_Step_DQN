@@ -55,7 +55,7 @@ class DqnCnnModel(Model):
         qvalue = self.critic[1](self.critic[0](input / self.norm_val).view(input.size(0), -1))
         return qvalue
 
-    def get_action(self, input, enable_per=False, eps=0., device=torch.device('cpu')):
+    def get_action(self, input, eps=0., device=torch.device('cpu')):
         forward_flag = True
         action, qvalue, max_qvalue, qvalues = None, None, None, None
         input = torch.FloatTensor(input).unsqueeze(0).to(device)
@@ -63,8 +63,7 @@ class DqnCnnModel(Model):
             action = np.random.randint(self.output_dims,
                                        size=(input.size(0),
                                              self.action_dims))
-            if not enable_per:
-                forward_flag = False
+            forward_flag = False
         if forward_flag:
             qvalues = self.forward(input)
             max_qvalue, max_action = qvalues.max(dim=1, keepdim=True)
@@ -73,6 +72,4 @@ class DqnCnnModel(Model):
             if action is None:  # then having to return a greedy action to execute
                 qvalue, action = max_qvalue, max_action
                 action = np.array([[action]])
-            elif enable_per:    # already sampled a random action, needs to evaluate its q
-                qvalue = qvalues[0][action[0][0]].item()
         return action, qvalue, max_qvalue, qvalues

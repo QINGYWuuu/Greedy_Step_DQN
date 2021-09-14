@@ -2,19 +2,15 @@ import time
 from tensorboardX import SummaryWriter
 
 
-def dqn_logger(process_ind, args,
+def dqn_logger(args,
                global_loggers,
                actor_loggers,
                learner_loggers,
                evaluator_loggers):
-    # loggers
-    print("---------------------------->", process_ind, "logger")
+
     actor_total_nepisodes = 0
+    board = SummaryWriter(args.tensorboard_file)
 
-    # set up board
-    board = SummaryWriter(args.log_dir)
-
-    # start logging
     last_log_time = time.time()
     current_actor_step = 0
     current_learner_step = 0

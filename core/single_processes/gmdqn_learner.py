@@ -98,40 +98,30 @@ from utils.helpers import ensure_global_grads
 #         else: # wait for memory_size to be larger than learn_start
 #             time.sleep(1)
 
-def gmdqn_learner(process_ind, args,
-                global_logs,
-                learner_logs,
-                model_prototype,
-                global_memory,
-                maxmin_dqns,
-                global_optimizers,
-                ):
-    # logs
-    print("---------------------------->", process_ind, "learner")
+def gmdqn_learner(learner_id,
+                  args,
+                  global_logs,
+                  learner_logs,
+                  model_prototype,
+                  global_memory,
+                  dqn):
 
-    local_device = torch.device('cuda:' + str(args.gpu_ind)) # local device compute target only
+    local_device = torch.device('cuda')
 
-    local_target_maxmin_dqns = {}
-    local_optimizers = {}
-    print("learner create {} nets".format(args.maxmin_dqn_num))
-    for dqn_id in range(args.maxmin_dqn_num):
-        local_target_maxmin_dqn = model_prototype(args.model_params,
-                                         args.norm_val,
-                                         args.state_shape,
-                                         args.action_space,
-                                         args.action_shape).to(local_device)
-        local_target_maxmin_dqn.load_state_dict(maxmin_dqns[dqn_id].state_dict())
-        local_target_maxmin_dqns.update({dqn_id: local_target_maxmin_dqn})
-        maxmin_dqns[dqn_id].train()
-        local_optimizers.update({dqn_id: args.agent_params.optim(maxmin_dqns[dqn_id].parameters(),
-                                                                 lr=args.agent_params.lr,
-                                                                 weight_decay=args.agent_params.weight_decay)})
+    target_dqn = model_prototype(args.model_params,
+                                 args.norm_val,
+                                 args.state_shape,
+                                 args.action_space,
+                                 args.action_shape).to(local_device)
+    target_dqn.load_state_dict(dqn.state_dict())
 
-    # params
+    dqn.train()
+    optimizer = args.agent_params.optim(dqn.parameters(),
+                                        lr=args.agent_params.lr,
+                                        weight_decay=args.agent_params.weight_decay)
+
     gamma = args.agent_params.gamma
-    # setup
     torch.set_grad_enabled(True)
-    # main control loop
     step = 0
     traj_cache_num = 0 # this is the count which record the sample number situation, and it's range is [0, +inf]
     # if traj_cache_num >= batch_size  sample one batch to update, and traj_cache_num = traj_cache_num - batch_size
@@ -147,10 +137,10 @@ def gmdqn_learner(process_ind, args,
                     with torch.no_grad():
                         traj_state, traj_action, traj_reward = global_memory.sample(1)
                         traj_state = traj_state.cuda(non_blocking=True).to(local_device)
+                        if args.enable_double:
+                            double_dqn_action = dqn(traj_state[1:]).max(dim=1)[1].unsqueeze(dim=1)
 
-                        double_dqn_action = maxmin_dqns[0](traj_state[1:]).max(dim=1)[1].unsqueeze(dim=1)
-
-
+                        traj_target_qvalues = target_dqn(traj_state[1:])
                         maxmin_qvalues = torch.zeros(args.maxmin_dqn_num, len(traj_state)-1, args.action_space).cuda(non_blocking=True).to(local_device)
                         for dqn_id in range(args.maxmin_dqn_num):
                             traj_target_qvalues = local_target_maxmin_dqns[dqn_id](traj_state[1:])

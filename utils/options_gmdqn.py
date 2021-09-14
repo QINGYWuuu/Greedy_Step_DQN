@@ -74,25 +74,27 @@ CONFIGS = [
 [ "gmdqn",      "atari",  "zaxxon",          "shared-traj",    "gmdqn-cnn" ], # 62
 ]
 class Params(object):
-    def __init__(self, config, random_seed):
-        # training configuration
-        self.mode = 1             # 1(train) | 2(test model_file)
+    def __init__(self, config, random_seed, num_actors):
+        self.mode = 1
         self.config = config
         self.agent_type, self.env_type, self.game, self.memory_type, self.model_type = CONFIGS[config]
         self.seed = random_seed
         self.render = False
         self.visualize = True
         self.num_envs_per_actor = 1
-        self.num_actors = 1
+        self.num_actors = num_actors
         self.num_learners = 1
         self.enable_double = True
-        self.refs = "greedy_step_dqn,env={},seed={},double={}".format(self.game, self.seed, self.enable_double)
+        self.configs = "/All_RESULTS/greedy_step_dqn,env={},seed={},double={},actor={}".format(self.game, self.seed, self.enable_double, self.num_actors)
 
 
         self.root_dir = os.getcwd()
-        self.model_name = self.root_dir + "/models/" + self.refs + ".pth"
-        self.save_log_csv = self.root_dir + "/csv_logs/" + self.refs + ".csv"
-        self.log_dir = self.root_dir + "/logs/" + self.refs + "/"
+        if os.path.exists(self.root_dir + self.configs) is False:
+            os.makedirs(self.root_dir + self.configs)
+        self.model_file = self.root_dir + self.configs + "/model.pth"
+        self.evaluation_csv_file = self.root_dir + self.configs + "/evaluation.csv"
+        self.Q_value_csv_file = self.root_dir + self.configs + "/Q_value.csv"
+        self.tensorboard_file = self.root_dir + self.configs
 
         self.model_file = None
         if self.mode == 2:
@@ -101,10 +103,8 @@ class Params(object):
             self.visualize = False
 
 class EnvParams(Params):
-    def __init__(self, config, gpu_ind, dqn_num, random_seed):
-        super(EnvParams, self).__init__(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-
-        # for preprocessing the states before outputing from env
+    def __init__(self, config, random_seed, num_actors):
+        super(EnvParams, self).__init__(config=config, random_seed=random_seed, num_actors=num_actors)
         if "mlp" in self.model_type:    # low dim inputs, no preprocessing or resizing
             self.state_cha = 1          # NOTE: equals hist_len
             self.state_hei = 1          # NOTE: always 1 for mlp's
@@ -115,55 +115,32 @@ class EnvParams(Params):
             self.state_wid = 84
 
         if self.env_type == "atari":
-            self.early_stop = 12500     # TODO: check Rainbow
+            self.early_stop = 12500
 
 
 class MemoryParams(Params):
-    def __init__(self, config, gpu_ind, dqn_num, random_seed):
-        super(MemoryParams, self).__init__(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-
+    def __init__(self, config, random_seed, num_actors):
+        super(MemoryParams, self).__init__(config=config, random_seed=random_seed, num_actors=num_actors)
         if self.memory_type == "shared-traj":
             if self.agent_type == "gmdqn":
                 self.memory_size = 50000
-
-            self.enable_per = False             # TODO: not completed for now: prioritized experience replay
-            # dtype for states
             if "mlp" in self.model_type:
-                # self.dtype = torch.float32    # somehow passing in dtype causes error in mp
                 self.tensortype = torch.FloatTensor
             elif "cnn" in self.model_type:      # save image as byte to save space
-                # self.dtype = torch.uint8      # somehow passing in dtype causes error in mp
                 self.tensortype = torch.ByteTensor
 
-            self.enable_per = False             # prioritized experience replay
-            if self.enable_per:
-                self.priority_exponent = 0.5    # TODO: rainbow: 0.5, distributed: 0.6
-                self.priority_weight = 0.4
-
-
 class ModelParams(Params):
-    def __init__(self, config, gpu_ind, dqn_num, random_seed):
-        super(ModelParams, self).__init__(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-
-        # NOTE: the devices cannot be passed into the processes this way
-        # if 'discrete' in self.model_type:
-        #     self.model_device = torch.device('cpu')
-        # if 'continuous' in self.model_type:
-        #     self.model_device = torch.device('cpu')
-
+    def __init__(self, config, random_seed, num_actors):
+        super(ModelParams, self).__init__(config=config, random_seed=random_seed, num_actors=num_actors)
 
 class AgentParams(Params):
-    def __init__(self, config, gpu_ind, dqn_num, random_seed):
-        super(AgentParams, self).__init__(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-
-        if self.agent_type == "gmdqn": # same as dqn
-            # criteria and optimizer
+    def __init__(self, config, random_seed, num_actors):
+        super(AgentParams, self).__init__(config=config, random_seed=random_seed, num_actors=num_actors)
+        if self.agent_type == "gmdqn":
             self.value_criteria = nn.MSELoss()
-            # self.optim = torch.optim.RMSprop
             self.optim = torch.optim.Adam
-            # generic hyperparameters
-            self.num_tasks           = 1    # NOTE: always put main task at last
-            self.steps               = int(1e6) # max #iterations learner step
+            self.num_tasks           = 1
+            self.steps               = int(1e6)+1000
             self.gamma               = 0.99
             self.clip_grad           = np.inf#40.#100
             self.lr                  = 1e-4#2.5e-4/4.
@@ -175,23 +152,21 @@ class AgentParams(Params):
             self.actor_freq          = 250  # push & reset local actor stats every this many actor steps
             self.learner_freq        = 100  # push & reset local learner stats every this many learner steps
             self.evaluator_freq      = 300   # eval every this many secs
-            self.evaluator_nepisodes = 1    # eval for this many episodes # TODO:
+            self.evaluator_nepisodes = 10
             self.tester_nepisodes    = 50
             # off-policy specifics
             self.learn_start         = 5000 # start update params after this many steps 5000
             self.batch_size          = 128 # 128
             self.target_model_update = 250
-            self.nstep               = 2    # NOTE: looks this many steps ahead
             # dqn specifics
-            self.enable_double       = False#True#False
             self.eps                 = 0.4
             self.eps_alpha           = 7
 
 
 class Options(Params):
-    def __init__(self, config, gpu_ind, dqn_num, random_seed):
-        Params.__init__(self, config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-        self.env_params = EnvParams(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-        self.memory_params = MemoryParams(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-        self.model_params = ModelParams(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
-        self.agent_params = AgentParams(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
+    def __init__(self, config, random_seed, num_actors):
+        Params.__init__(self, config=config, random_seed=random_seed, num_actors=num_actors)
+        self.env_params = EnvParams(config=config, random_seed=random_seed, num_actors=num_actors)
+        self.memory_params = MemoryParams(config=config, random_seed=random_seed, num_actors=num_actors)
+        self.model_params = ModelParams(config=config, random_seed=random_seed, num_actors=num_actors)
+        self.agent_params = AgentParams(config=config, random_seed=random_seed, num_actors=num_actors)
