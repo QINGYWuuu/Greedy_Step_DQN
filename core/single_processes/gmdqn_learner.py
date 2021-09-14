@@ -2,6 +2,7 @@ import time
 import torch
 import torch.nn as nn
 import numpy as np
+import pandas as pd
 import random
 from utils.helpers import update_target_model
 from utils.helpers import ensure_global_grads
@@ -129,6 +130,7 @@ def gmdqn_learner(learner_id,
     traj_target_cache = []
     traj_state_cache = []
     traj_action_cache = []
+    Q_VALUES = []
 
     while global_logs.learner_step.value <= args.agent_params.steps:
         if global_memory.size > args.agent_params.learn_start: # the memory buffer size is satisty the requirement of training
@@ -137,25 +139,21 @@ def gmdqn_learner(learner_id,
                     with torch.no_grad():
                         traj_state, traj_action, traj_reward = global_memory.sample(1)
                         traj_state = traj_state.cuda(non_blocking=True).to(local_device)
+                        traj_len = len(traj_reward)
+                        with torch.no_grad():
+                            traj_target_qvalues = target_dqn(traj_state[1:])
                         if args.enable_double:
                             double_dqn_action = dqn(traj_state[1:]).max(dim=1)[1].unsqueeze(dim=1)
-
-                        traj_target_qvalues = target_dqn(traj_state[1:])
-                        maxmin_qvalues = torch.zeros(args.maxmin_dqn_num, len(traj_state)-1, args.action_space).cuda(non_blocking=True).to(local_device)
-                        for dqn_id in range(args.maxmin_dqn_num):
-                            traj_target_qvalues = local_target_maxmin_dqns[dqn_id](traj_state[1:])
-                            maxmin_qvalues[dqn_id] = traj_target_qvalues
-
-                        traj_target_q = gamma * maxmin_qvalues.min(dim=0)[0].gather(1, double_dqn_action).squeeze() # double_dqn
-
-                        # traj_target_q = gamma * maxmin_qvalues.min(dim=0)[0].max(dim=1)[0]
+                            traj_target_q = gamma * traj_target_qvalues.gather(1, double_dqn_action).squeeze() # double_dqn
+                        else:
+                            traj_target_q = gamma * traj_target_qvalues.max(dim=1)[0]
                         traj_target_q[-1] = 0
-                        traj_target_q = torch.eye(len(traj_target_q)).cuda() * (
-                                    traj_target_q.unsqueeze(dim=1) + traj_reward.cuda())
-                        for row in range(len(traj_state) - 3, -1, -1):
+
+                        traj_target_q = torch.eye(traj_len).cuda()*traj_target_q.unsqueeze(dim=1) + traj_reward.cuda()*torch.tensor(np.triu(np.ones(traj_len))).cuda()
+                        for row in range(traj_len-2, -1, -1):
                             traj_target_q[row] = traj_target_q[row] + gamma * traj_target_q[row + 1]
                             traj_target_q[row + 1][:row + 1] = -np.inf
-                        traj_target_q = traj_target_q.max(dim=0)[0].unsqueeze(dim=1)
+                        traj_target_q = traj_target_q.max(dim=1)[0].unsqueeze(dim=1)
 
                     if traj_target_cache == [] or traj_state_cache == [] or traj_action_cache == []:
                         traj_target_cache = traj_target_q
@@ -169,11 +167,7 @@ def gmdqn_learner(learner_id,
                         traj_cache_num += len(traj_action)
 
             elif traj_cache_num >= args.agent_params.batch_size:
-                update_dqn_id = np.random.randint(0, args.maxmin_dqn_num)# select one dqn to update
-
-                local_optimizers[update_dqn_id].zero_grad()
-
-                # todo sample batch_size from the cache
+                optimizer.zero_grad()
                 sample_index = random.sample(list(range(traj_cache_num)), args.agent_params.batch_size)
                 sample_index.sort(reverse=True)
                 remain_index = list(set(list(range(traj_cache_num)))^set(sample_index))
@@ -196,20 +190,22 @@ def gmdqn_learner(learner_id,
                     traj_action_cache = torch.index_select(traj_action_cache, 0, remain_index.cpu())
                     traj_cache_num -= args.agent_params.batch_size
 
-                batch_predict = maxmin_dqns[update_dqn_id](batch_state).gather(1, batch_action.long().cuda()).cuda(non_blocking=True).to(local_device)
+                batch_predict = dqn(batch_state).gather(1, batch_action.long().cuda()).cuda(non_blocking=True).to(local_device)
+                if step % 5000 == 0:
+                    Q_VALUES.append([step, batch_predict.mean().detach().cpu()])
+                    df = pd.DataFrame(data=Q_VALUES)
+                    df.to_csv(args.Q_value_csv_file)
 
-                critic_loss = args.agent_params.value_criteria(batch_predict, batch_target)
+                critic_loss = args.agent_params.value_criteria(batch_predict, batch_target.float())
                 critic_loss.backward()
-                nn.utils.clip_grad_value_(maxmin_dqns[update_dqn_id].parameters(), args.agent_params.clip_grad)
-                local_optimizers[update_dqn_id].step()
-                update_target_model(maxmin_dqns[update_dqn_id], local_target_maxmin_dqns[update_dqn_id], args.agent_params.target_model_update, step)
+                nn.utils.clip_grad_value_(dqn.parameters(), args.agent_params.clip_grad)
+                optimizer.step()
+                update_target_model(dqn, target_dqn, args.agent_params.target_model_update, step)
 
                 with global_logs.learner_step.get_lock():
                     global_logs.learner_step.value += 1
-                    # print("learners update times = {}, loss = {}".format(global_logs.learner_step.value, critic_loss.item()))
                 step += 1
 
-                    # report stats
                 if step % args.agent_params.learner_freq == 0: # then push local stats to logger & reset local
                     learner_logs.critic_loss.value += critic_loss.item()
                     learner_logs.loss_counter.value += 1

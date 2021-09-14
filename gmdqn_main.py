@@ -118,7 +118,8 @@ def greedy_step_dqn(config, random_seed, num_actors):
         p.join()
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 if __name__ == '__main__':
-    for config in range(26):
-        greedy_step_dqn(config=config, random_seed=101, num_actors=1)
+    # for config in range(26):
+    for config in [20]:
+        greedy_step_dqn(config=config, random_seed=1, num_actors=1)

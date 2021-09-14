@@ -32,7 +32,7 @@ def evaluator(args,
     eval_csv_logs = []
     while global_logs.learner_step.value < args.agent_params.steps:
 
-        if global_logs.learner_step.value % 10 == 0 and global_logs.learner_step.value > last_eval_learner_step:
+        if global_logs.learner_step.value % 10000 == 0 and global_logs.learner_step.value > last_eval_learner_step:
 
             eval_record = []  # [step, eva 1, eva 2, ..., eva n, eva aver]
             last_eval_learner_step = global_logs.learner_step.value
