@@ -1,7 +1,5 @@
-import numpy as np
 import os
 import torch
-import torch.nn as nn
 import torch.multiprocessing as mp
 
 from utils.options_gmdqn import Options
@@ -10,7 +8,7 @@ from utils.factory import LoggersDict, ActorsDict, LearnersDict, EvaluatorsDict,
 from utils.factory import EnvsDict, MemoriesDict, ModelsDict
 
 
-def gmdqn_agent(config, gpu_ind, dqn_num, random_seed):
+def greedy_step_dqn(config, gpu_ind, dqn_num, random_seed):
     mp.set_start_method("spawn", force=True)
 
     opt = Options(config=config, gpu_ind=gpu_ind, dqn_num=dqn_num, random_seed=random_seed)
@@ -18,7 +16,7 @@ def gmdqn_agent(config, gpu_ind, dqn_num, random_seed):
 
     env_prototype = EnvsDict[opt.env_type]
     memory_prototype = MemoriesDict[opt.memory_type]
-    model_prototype = ModelsDict[opt.model_type] # TODO maxmin ensemble
+    model_prototype = ModelsDict[opt.model_type]
 
     # dummy env to get state/action/reward/gamma/terminal_shape & action_space
     dummy_env = env_prototype(opt.env_params, 0)
@@ -133,4 +131,4 @@ if __name__ == '__main__':
     for config in range(25,-1,-1):
     # 24, 32, 52, 58
     # for config in [52]:
-        gmdqn_agent(config=config, gpu_ind=0, dqn_num=1, random_seed=101)
+        greedy_step_dqn(config=config, gpu_ind=0, dqn_num=1, random_seed=101)

@@ -74,50 +74,31 @@ CONFIGS = [
 [ "gmdqn",      "atari",  "zaxxon",          "shared-traj",    "gmdqn-cnn" ], # 62
 ]
 class Params(object):
-    def __init__(self, config, gpu_ind, dqn_num, random_seed):
+    def __init__(self, config, random_seed):
         # training configuration
-        self.mode       = 1             # 1(train) | 2(test model_file)
-        self.config     = config
-        self.gpu_ind    = gpu_ind             # learner will be using device('cuda:gpu_ind')
-
+        self.mode = 1             # 1(train) | 2(test model_file)
+        self.config = config
         self.agent_type, self.env_type, self.game, self.memory_type, self.model_type = CONFIGS[config]
-
-        self.seed       = random_seed   # random seed
-        self.render     = False         # whether render the window from the original envs or not
-        self.visualize  = True          # whether do online plotting and stuff or not
-
-        self.num_envs_per_actor = 1     # NOTE: must be 1 for envs that don't have parallel support
-        self.num_actors = 1             # actor default=8
-        self.num_learners = 1           # learner
-        self.maxmin_num = dqn_num
-        # training signature
-        self.agent_info    = "gmdqn_{}-env={}_seed={}".format(self.maxmin_num, self.game, self.seed)
-        self.refs = self.agent_info
+        self.seed = random_seed
+        self.render = False
+        self.visualize = True
+        self.num_envs_per_actor = 1
+        self.num_actors = 1
+        self.num_learners = 1
+        self.enable_double = True
+        self.refs = "greedy_step_dqn,env={},seed={},double={}".format(self.game, self.seed, self.enable_double)
 
 
-        nowtime = time.localtime()
-        # self.timestamp  = "{}{}{}-{}{}{}".format(nowtime.tm_year, nowtime.tm_mon, nowtime.tm_mday, nowtime.tm_hour, nowtime.tm_min, nowtime.tm_sec)    # "ymd-hms##"
-        # prefix for saving models&logs
-        # self.refs       = self.agent_info + "_" + self.timestamp
-
-
-        self.root_dir   = os.getcwd()
-
-        # model files
-        # NOTE: will save the current model to model_name
+        self.root_dir = os.getcwd()
         self.model_name = self.root_dir + "/models/" + self.refs + ".pth"
-        # NOTE: will save the current csv to model_name
         self.save_log_csv = self.root_dir + "/csv_logs/" + self.refs + ".csv"
-        # NOTE: will load pretrained model_file if not None
-        self.model_file = None#self.root_dir + "/models/{TODO:FILL_IN_PRETAINED_MODEL_FILE}.pth"
-        if self.mode == 2:
-            self.model_file = self.model_name  # NOTE: so only need to change self.mode to 2 to test the current training
-            assert self.model_file is not None, "Pre-Trained model is None, Testing aborted!!!"
-            self.visualize = False
-
-        # logging configs
         self.log_dir = self.root_dir + "/logs/" + self.refs + "/"
 
+        self.model_file = None
+        if self.mode == 2:
+            self.model_file = self.model_name
+            assert self.model_file is not None, "Pre-Trained model is None, Testing aborted!!!"
+            self.visualize = False
 
 class EnvParams(Params):
     def __init__(self, config, gpu_ind, dqn_num, random_seed):
